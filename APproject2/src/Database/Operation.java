@@ -10,6 +10,8 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import DataType.Note;
+import DataType.NoteHistory;
+
 import java.util.ArrayList;
 
 import java.util.List;
@@ -46,20 +48,18 @@ public class Operation {
     public void save(int notePadID, String title, String content, String type, java.util.Date updated_at) throws SQLException {
         Connection conn = DatabaseConnect.getConnection();
 
-        String sql = "UPDATE notes SET title = ?, content = ?, type = ?, created_at = ?, updated_at = ? WHERE id = ?";
+        String sql = "UPDATE notes SET title = ?, content = ?, type = ?,  updated_at = ? WHERE id = ?";
         PreparedStatement updateStmt = conn.prepareStatement(sql);
         updateStmt.setString(1, title);
         updateStmt.setString(2, content);
         updateStmt.setString(3, type);
 
-        // Assuming converter method converts to java.sql.Date
         java.sql.Date sqlDate = converter(updated_at);
         updateStmt.setDate(4, sqlDate);
 
-        updateStmt.setInt(5, notePadID);  // Set notePadID as a parameter in WHERE clause
+        updateStmt.setInt(5, notePadID);  
         updateStmt.executeUpdate();
 
-        // Consider if both content updates are necessary in your data model
         storeEditedNote(notePadID, content);
         conn.close();
      }
@@ -79,13 +79,34 @@ public class Operation {
                 java.util.Date created_at = result.getDate("created_at");
                 java.util.Date updated_at = result.getDate("updated_at");
 
-                return new Note(title, content, type, created_at, updated_at);
+                return new Note(id,title, content, type, created_at, updated_at);
             }
         }
 
         return null;
     }
-    
+
+public List<NoteHistory> viewEditHistory(int noteId) throws SQLException {
+    List<NoteHistory> editHistory = new ArrayList<>();
+    Connection conn = DatabaseConnect.getConnection();
+
+    try (PreparedStatement stmt = conn.prepareStatement("SELECT edited_content, edited_at FROM edit_history WHERE note_id = ? ORDER BY edited_at DESC")) {
+        stmt.setInt(1, noteId);
+        try (ResultSet rs = stmt.executeQuery()) {
+            while (rs.next()) {
+                String editedContent = rs.getString("edited_content");
+                java.util.Date editedAt = rs.getDate("edited_at");
+                NoteHistory historyEntry = new NoteHistory(editedContent, editedAt);
+                editHistory.add(historyEntry);
+            }
+        }
+    } finally {
+        conn.close();
+    }
+
+    return editHistory;
+}
+
     public static List<Note> DisplayNotes() throws SQLException {
         List<Note> results = new ArrayList<>();
         Connection conn = DatabaseConnect.getConnection();
@@ -101,7 +122,7 @@ public class Operation {
                 java.util.Date created_at = result.getDate("created_at");
                 java.util.Date updated_at = result.getDate("updated_at");
                
-                Note note = new Note(title, content, type, created_at, updated_at);
+                Note note = new Note(id,title, content, type, created_at, updated_at);
                 results.add(note);
             }
         }
@@ -111,12 +132,42 @@ public class Operation {
     
     public void storeEditedNote(int noteId, String editedContent) throws SQLException{
         Connection conn = DatabaseConnect.getConnection();
-        try(PreparedStatement SQL = conn.prepareStatement("INSERT INTO editednote (note_id, edited_content, edited_at) VALUES (?, ?, CURRENT_TIMESTAMP)")){
+        try(PreparedStatement SQL = conn.prepareStatement("INSERT INTO edit_history (note_id, edited_content, edited_at) VALUES (?, ?, CURRENT_TIMESTAMP)")){
             SQL.setInt(1,noteId);
             SQL.setString(2, editedContent);
             SQL.executeUpdate();
         }
         finally{
+            conn.close();
+        }
+    }
+    public void deleteByID(int noteID)throws SQLException{
+        Connection conn = DatabaseConnect.getConnection();
+        PreparedStatement countSmt = conn.prepareStatement("SELECT COUNT(*) FROM notes");
+        ResultSet count = countSmt.executeQuery();
+        boolean isEmpty = true;
+        if(count.next()){
+            int rowCount = count.getInt(1);
+            isEmpty = rowCount == 0;
+        }
+        count.close();
+        countSmt.close();
+        if(!isEmpty){
+            try (PreparedStatement deleteNote = conn.prepareStatement("DELETE FROM notes WHERE id = ?");
+                 PreparedStatement deleteEditedNote = conn.prepareStatement("DELETE FROM editednote WHERE id = ?")){
+                deleteNote.setInt(1, noteID);
+                deleteEditedNote.setInt(1, noteID);
+
+                deleteNote.executeUpdate();
+
+            }
+
+            finally{
+                conn.close();
+            }
+        }
+        else{
+            System.out.print("Empty table");
             conn.close();
         }
     }
@@ -132,5 +183,4 @@ public class Operation {
     }
     }
     
- }
-
+ 
